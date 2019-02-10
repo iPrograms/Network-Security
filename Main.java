@@ -2,6 +2,7 @@ import java.util.*;
 
 /***
  * (Due on Monday,  April 2, 2018.)
+ * @author Manzoor Ahmed
  *
  * Follow the Wireless CSMA/CA explained in the PPT slides (including the flow chart and the frames transition chart example)
  * and write Java or C++ to implement the simulation of CSMA/CA. Consider at least 4 stations that are sharing a communication channel. 
@@ -14,7 +15,7 @@ import java.util.*;
 class Main{
 	public static void main(String[] args) {
 
-		if(args.length == 9) {
+		if(args.length == 10) {
 			ArrayList<Station> allStations;
 
 			// The transmission medium or carrier
@@ -38,7 +39,8 @@ class Main{
 						Integer.parseInt(args[5]),
 						Integer.parseInt(args[6]),
 						Integer.parseInt(args[7]),
-						Integer.parseInt(args[8]));
+						Integer.parseInt(args[8]),
+					    Integer.parseInt(args[9]));
 
 				newStation.setIpaddress(s);
 				newStation.setCommunicationChannel(carrierChannel);
@@ -48,21 +50,16 @@ class Main{
 
 			}
 
-
-
 			//Get all the station that want to use this channel
 			allStations = carrierChannel.getAllCarrierStations();
 
 			System.out.println("****************************** ");
-			System.out.println("Stations using channel:");
-			System.out.println("****************************** ");
+			System.out.println("Stations setup \n [source] ==== [ Destination]  using the channel:");
+			System.out.println("****************************** \n");
 
-
-
-			//start communicating..
 
 			// Source and destination
-			// ---> 
+		
 			allStations.get(0).setSourceStation(allStations.get(0));
 			allStations.get(0).setDestinationStation(allStations.get(1));
 			allStations.get(1).isDestination = true;
@@ -70,7 +67,6 @@ class Main{
 			allStations.get(2).setSourceStation(allStations.get(2));
 			allStations.get(2).setDestinationStation(allStations.get(3));
 			allStations.get(3).isDestination = true;
-
 
 
 			allStations.get(4).setSourceStation(allStations.get(4));

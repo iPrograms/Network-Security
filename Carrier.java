@@ -4,7 +4,7 @@ import java.util.*;
  * Carrier the carrier which holds the communication channel
  * 
  * @author Manzoor Ahmed 
-   @version: 1.0
+ *  @version: 1.0
  */
 public class Carrier {
 
@@ -13,6 +13,7 @@ public class Carrier {
 		public boolean isChannelBusy = false;
 		private int stationsUsingChannel = 0;
 		private  ArrayList<Station> allStations;
+		private  ArrayList<Station> queuedStations;
 
 		/**
 		 * The Channel which each Staion communicates 
@@ -22,6 +23,7 @@ public class Carrier {
 
 			//This carrier allows only 100 stations 
 			this.allStations = new ArrayList<Station>(100);
+			this.queuedStations = new ArrayList<Station>(100);
 		}
 
 		/**
@@ -57,99 +59,83 @@ public class Carrier {
 		 */
 		public synchronized boolean isChannelBusy(Station readyStation){
 
-			try {
-
-				Thread.sleep(100);
-				if(this.stationsUsingChannel > 1) {
+			
+				if(this.queuedStations.size() > 1 ) {
 					//if (allStations.get(index).isTransmitting == true) {
 
 					isChannelBusy = true;
 					System.out.println(" ---busy--- ");
+					
+					resolveContension();
 
 				}else {
 					isChannelBusy = false;
 					System.out.println(" ---free--- ");
 				}
 
-			}catch( InterruptedException e ) {
-				;
-			}
 			return isChannelBusy;
 		}
-
-
-		public synchronized int resolveContension(int[] stationsBackoff){
-
-			int stationNumber = 0;
-
-			for (int conflicts=0; conflicts <= allStations.size() -1 ; conflicts++) {
-
-				if(allStations.get(conflicts).isDestination == true) {
-
-				}else {
-
-					// Get the Station with high back-off time and let it transmit first
-					if(allStations.get(conflicts).getBackoffTime() == stationsBackoff[stationsBackoff.length -1 ]){
-
-						// Get the station ip 
-						Station s = allStations.get(conflicts);
-						stationNumber = s.getIpaddress();
-					}
-				}
-			}
-
-			return stationNumber;
+		
+		/**
+		 * 
+		 * 
+		 * 
+		 * */
+		public synchronized void queueStationForTransmitting(Station s) {
+			this.queuedStations.add(s);
 		}
 
-		public synchronized int getContensionStationsBackoffTime() {
-
-			int cont[] = new int[allStations.size() -1 ];
-
-			for(int c =0; c<=this.allStations.size() -1; c++) {
-
-				if(allStations.get(c).isDestination == true) {
-
-				}else {
-					if(this.allStations.get(c).getBackoffTime() > 2) {
-
-						//these are the stations with extra back-off time
-						cont[c] = allStations.get(c).getBackoffTime();
-					}
-				}
+		/**
+		 * Resolve contention between Stations
+		 * 
+		 * 
+		 * */
+		public synchronized void resolveContension(){
+			
+			// Find the Station with less back-off time and let it transmit first
+			
+			Collections.sort(this.queuedStations);
+			
+			System.out.println("Contention Stations:\n ");
+			for(int cont=0; cont<= this.queuedStations.size() -1; cont++) {
+				System.out.println("" +queuedStations.get(cont).getStationName() + "x ");
 			}
+			// Let the Station with low back-off time go first 
+			this.queuedStations.get(0).isTransmitting = true;
+			this.queuedStations.get(0).isreadyForTransmission = true;
+			this.queuedStations.get(0).isNAVset = false;
+			
+			System.out.println(this.queuedStations.get(0).getStationName() + " won contention");
 
-			// Resolve contension for these stations
-			return this.resolveContension(cont);
+			// Other Stations should back-off
+
+			for (int s=1;s<=this.queuedStations.size()-1; s++ ) {
+				
+				this.queuedStations.get(s).setBackOffTime();
+			}
+			
+			// Clean up contention  
+			this.queuedStations.clear();
 		}
 
+	
 		public synchronized int getStationsUsingChannelCount() {
 			return stationsUsingChannel;
 		}
 
-		public synchronized void incrementChannelQueue() {
-			this.stationsUsingChannel++;
-		}
-		public synchronized void incrementChannelQueueBy(int s) {
-			this.stationsUsingChannel = s;
-			this.isChannelBusy = false;
-		}
-		public synchronized void decrementChannelQueue() {
-			this.stationsUsingChannel--;
-		}
-
-		public synchronized void remainingStationMustSetNAVto(int ip, int rtsTime) {
+		public synchronized void remainingStationMustSetNAVto(int ip, int rtsTime){
 
 			for(int rts=0; rts<=this.allStations.size()-1;rts++) {
 
 				if(allStations.get(rts).getIpaddress() == ip || 
 						allStations.get(rts).isDestination == true) {
 
-					// No this Station
+					
 				}else {
 
 					// Set NAVS for other stations
 					allStations.get(rts).waitNAVPeriod(rtsTime);
-					decrementChannelQueue();
+					
 				}
 			}
 		}

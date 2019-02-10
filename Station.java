@@ -10,7 +10,7 @@ import java.util.*;
 	@Version 1.0
  */
 
-class Station extends Thread {
+class Station extends Thread implements Comparable<Station> {
 
 	private String stationName;
 	private int RTS_TIME;
@@ -39,7 +39,7 @@ class Station extends Thread {
 	public boolean isDestination = false;
 	private int backOffTime;
 
-	private int maxContensionWindowSize = 100;
+	private int maxContensionWindowSize = 1224;
 
 	/*****************************************************************************
 	 * 
@@ -80,7 +80,7 @@ class Station extends Thread {
 	 */
 
 	public Station(String stationName, int stationnumber, String dataTosend, int backofftime, int rtstime, int sifstime, 
-			int ctstime, int difstime, int acktime, int ifstime) {
+			int ctstime, int difstime, int acktime, int ifstime, int mcw) {
 
 		this.stationName = "["+stationName + ":" + stationnumber + "]\t " ;
 		this.data = dataTosend;
@@ -93,6 +93,7 @@ class Station extends Thread {
 		this.setIFS_TIME(ifstime);
 		this.isDestination = false; // so destination can not send data, for simulation only
 		this.ipaddress = stationnumber;
+		this.maxContensionWindowSize = mcw;
 	}
 
 	/* (non-Javadoc)
@@ -101,10 +102,9 @@ class Station extends Thread {
 	@Override
 	public void run() {
 
-		try {
+		
 
-			// At random period this station wants to transmit
-
+			// Ignore the destination Station
 
 			if (this.isDestination == true) {
 				this.isreadyForTransmission = false;
@@ -115,102 +115,76 @@ class Station extends Thread {
 				// At random time try to transmit
 				transmit();
 
-				// Needs to send data
+				// Ready for transmitting?
 				if(isreadyForTransmission) {
 
 					//Check if Channel lets you
 					if(this.mainChannel.isChannelBusy(this) == false) {
 
-						// Channel increment how many stations wants to transmit through you
-						mainChannel.incrementChannelQueue();
-
-						// Keep other Stations quite for my RTS time
-						///mainChannel.remainingStationMustSetNAVto(this.getIpaddress(), this.getRTSTime());
-						
+						mainChannel.queueStationForTransmitting(this);
+					
+						// Wait IFS time, and if the Channel is clear  I will trasmit
+						waitIFS();
 						
 						// Channel is clear !
 						if(mainChannel.isChannelBusy(this) == false) {
 
-							
-							// I can transmit now
-							isTransmitting = true;
-							
-							// I will wait IFS time, and if the Channel is clear  I will trasmit
-							waitIFS();
-							Thread.sleep(IFS_TIME * 1000);
-							
-							mainChannel.remainingStationMustSetNAVto(this.getIpaddress(), getRTSTime());
-							
 							sendRTS();
-							Thread.sleep(1000);
-							destination.isRTS_recived = true;
-
+							
 							// The destination recived my RTS 
 							if(getDestinationStation().isRTS_recived == true) {
 	
-								Thread.sleep(this.SIFS_TIME * 1000);
-								waitSIFS();
-	
-								// Wait...
-								Thread.sleep(this.CTS_TIME * 1000);
-								sendCTS();
-									
-								destination.isCTS_sent = true;
-								source.isCTS_received = true;
-								
-								if (getSourceStation().isCTS_received == true) {
-	
-									Thread.sleep(this.DIFS_TIME);
-									waitDIFS();
-	
-									Thread.sleep(this.data.length());
-									trasmitDataToDestination();
-	
-									Thread.sleep(this.SIFS_TIME * 1000);
+								if(isNAVset == false && isTransmitting == true) {
+										
 									waitSIFS();
-	
-									Thread.sleep(this.ACK_TIME * 1000);
-									sendACK();
-
-									if (getSourceStation().isACK_received == true) {
-	
-										System.out.println("\nDone");
-	
-										mainChannel.decrementChannelQueue();
-	
-										try {
-	
-											notifyAll();
-										} catch (IllegalMonitorStateException imse) {
-	
+				
+									if (this.isCTS_received == true) {
+										
+										waitDIFS();
+										
+										sendCTS();
+										
+										// CTS was sent
+										if(this.getDestinationStation().isCTS_sent == true) {
+											
+											mainChannel.remainingStationMustSetNAVto(getIpaddress(), getRTSTime());
+											// Transmit to destination
+											trasmitDataToDestination();
+											
+											waitSIFS();
+											
+											// CTS was received
+											if(this.isCTS_received == true) {
+												
+												// Send ACK to destination
+												sendACK();
+												
+												if (getSourceStation().isACK_received == true) {
+													
+													System.out.println("Done");
+				
+													try {
+				
+														notifyAll();
+														
+													} catch (IllegalMonitorStateException imse) {
+				
+													}
+												}
+											}
 										}
-									}
-								}
-						else {
-								this.setBackOffTime();
-							 }
-							}else {
-								System.out.println("--busy---");
-								this.setBackOffTime();
-							}	
+										
+									}this.setBackOffTime();
+								}							
+							}
 						}
-
-					}else {
-
-						//Channel is busy, set your backoff time
-						System.out.println("---busy---");
-						setBackOffTime();
 					}
-
-				}
-
+				}this.setBackOffTime();
 			}
-
-		}catch( InterruptedException e) {
-
 		}
+	
 
-	}
+
 
 	/** Start transmitting when data is available at Random time */
 	/**
@@ -218,24 +192,45 @@ class Station extends Thread {
 	 */
 	public synchronized void transmit() {
 
+		// Ignore destination station
 		if (this.isDestination == true) {
 			isreadyForTransmission = false;
 			isTransmitting = false;
 
-		} else {
-			try {
-				System.out.println();
-				System.out.println("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~`");
-				Thread.sleep(new Random().nextInt(10000));
-
-			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
+		} 
+		
+		else {
+			
+			if(this.getDestinationStation().isACK_sent == true) {
+					System.out.println("...Waiting for ACK...");
+			}else if(this.isACK_received == true) {
+				
+				this.interrupt();
+				this.notifyAll();
 			}
-			setTransmisionTime(System.currentTimeMillis());
-			isreadyForTransmission = true;
-			isTransmitting = true;
-			System.out.println(getStationName() + " want to transmit at t=: " + System.currentTimeMillis());
+			
+			else {
+				try {
+					
+					System.out.println();
+				
+					Thread.sleep(new Random().nextInt(1900));
+				} catch (InterruptedException e) {
+					
+					e.printStackTrace();
+				}
+				
+				System.out.println(getStationName() + "  ~~~ woke up  ~~");
+				setTransmisionTime(System.currentTimeMillis());
+				isreadyForTransmission = true;
+				isTransmitting = true;
+				
+				if(this.getDestinationStation().isACK_sent == true) {
+					System.out.println(getStationName() + " ...waiting for ACK...\t t=:" + System.currentTimeMillis());
+				}else {
+					System.out.println(getStationName() + " wants to transmit at \t t=: " + System.currentTimeMillis());
+				}
+			}
 		}
 
 	}
@@ -261,27 +256,47 @@ class Station extends Thread {
 	 */
 	private synchronized void sendACK() {
 
-		System.out.println(this.getStationName() + " <---[ACK]--- " + this.getDestinationStation().getStationName() + "  "+ "\t t=: " +System.currentTimeMillis());
-		this.getDestinationStation().isACK_received = true;
+		Timer ackTimer = new Timer();
+		ackTimer.schedule(new TimerTask() {
+			@Override
+			public void run() {
+				
+				getDestinationStation().isACK_received = false;
+			}
+		}, this.ACK_TIME * 1000);
+		
+		ackTimer.cancel();
+	
+		System.out.println(getStationName() + " <---[ ACK ]--- " + getDestinationStation().getStationName() + "  "+ "\t t=: " +System.currentTimeMillis());
+		getDestinationStation().isACK_received = true;
 	}
 
 	/**
 	 * The station can transmit so send RTS destination
 	 * @return the RTS time of this Station
 	 */
-	private synchronized int sendRTS() {
+	private synchronized void sendRTS() {
 
-		// The data to send
+		System.out.println(source.getStationName() + " ---[ RTS ]---> " + this.destination.getStationName() + "  "+  "\t t=: " + System.currentTimeMillis());
+		
+		Timer rtsTimer = new Timer();
+		rtsTimer.schedule(new TimerTask() {
+			
+			@Override 
+			public void run() {
+				
+				// RTS is sent
+				isRTS_sent = true;
+				// Destination is waiting...
+				destination.isRTS_recived = false;
+			}
+		}, setRTSTime() * 1000);
+		
+		rtsTimer.cancel();
+		
+		// Got the RTS
+		destination.isRTS_recived = true;
 		this.isRTS_sent = true;
-		System.out.println(source.getStationName() + " ---[RTS]---> " + this.destination.getStationName() + "  "+  "\t t=: " + System.currentTimeMillis());
-
-		// What is your RTS time?
-
-		//destination.isRTS_recived = true;
-
-		// Tell the carrier to clear channel for this period
-		int myrtsTime = setRTSTime();
-		return myrtsTime;
 	}
 
 	/**
@@ -306,13 +321,11 @@ class Station extends Thread {
 							isNAVset = true;
 						}
 					}, period * 1000);
+					
 					t.cancel();	
 				
-			// You can transmit now
-			this.isreadyForTransmission = true;
-			this.isTransmitting = true;
-			this.isNAVset = false;
-			//this.mainChannel.incrementChannelQueueBy(1);
+			transmit();
+		
 		}
 	}
 
@@ -332,13 +345,23 @@ class Station extends Thread {
 	 */
 	public synchronized void sendCTS() {
 
+		Timer ctsTimer = new Timer();
+		ctsTimer.schedule(new TimerTask() {
+			
+			public void run() {
+				
+			}
+		}, this.CTS_TIME * 1000);
+		
+		ctsTimer.cancel();	
+		
 		// Did I get an RTS?
 		if (this.getDestinationStation().isRTS_recived == true) {
 
 			// Send CTS to destination
-			System.out.println(getStationName() + " <---[CTS]--- " + this.getDestinationStation().getStationName() + "  "+  "\t t=: " + System.currentTimeMillis());
+			System.out.println(getStationName() + " <---[ CTS ]--- " + this.getDestinationStation().getStationName() + "  "+  "\t t=: " + System.currentTimeMillis());
 
-			//this.getSourceStation().isCTS_received = true;
+			isCTS_received = true;
 		}
 	}
 
@@ -346,6 +369,16 @@ class Station extends Thread {
 	 * Waits SIF period
 	 */
 	public synchronized void waitSIFS() {
+		
+		Timer sifsTimer = new Timer();
+		sifsTimer.schedule(new TimerTask() {
+			
+			public void run() {
+				
+			}
+		}, this.SIFS_TIME * 1000);
+		
+		sifsTimer.cancel();	
 
 		System.out.println(getStationName() + " ---[ SIFS ]--- " + this.getDestinationStation().getStationName() + "  "+ "\t t=: " + System.currentTimeMillis());
 	}
@@ -355,7 +388,18 @@ class Station extends Thread {
 	 */
 	public synchronized void waitDIFS() {
 
-		System.out.println(getStationName() + " ---[DIFS]--- " + this.getDestinationStation().getStationName() + "  "+ "\t t=: "  + System.currentTimeMillis());
+		System.out.println(getStationName() + " ---[ DIFS ]--- " + this.getDestinationStation().getStationName() + "  "+ "\t t=: "  + System.currentTimeMillis());
+		Timer difsTimer = new Timer();
+		difsTimer.schedule(new TimerTask() {
+			
+			public void run() {
+				
+			}
+		}, this.DIFS_TIME * 1000);
+		
+		difsTimer.cancel();	
+		
+		
 	}
 
 	/**
@@ -393,7 +437,7 @@ class Station extends Thread {
 	}
 
 	public synchronized void waitIFS() {
-		System.out.println(this.getStationName() + " ---[IFS]--- " + getDestinationStation().getStationName() + "  "+ "\t t= "+ System.currentTimeMillis());
+		System.out.println(this.getStationName() + " ---[ IFS ]--- " + getDestinationStation().getStationName() + "  "+ "\t t=: "+ System.currentTimeMillis());
 	}
 	/**
 	 * @param newACKvalue
@@ -408,44 +452,65 @@ class Station extends Thread {
 	 **/
 	public synchronized void setBackOffTime() {
 
-		// Are you waiting for a while?
-		if (this.backOffTime >= this.maxContensionWindowSize) {
-
-			System.out.println(this.stationName + " aborting after " + this.backOffTime + "." + "  "+ "\t t:= " + System.currentTimeMillis());
-			try {
-				this.join();
-			} catch (InterruptedException e) {
-				// TODO Auto-generated catch block
-				e.printStackTrace();
-			}
-		}
-		else {
-				this.backOffTime+= (int) Math.pow(this.backOffTime, 2);
-				
-				Timer t = new Timer();
-				t.schedule(new TimerTask() {
-					
-					public void run() {
-						isreadyForTransmission = false;
-						isTransmitting = false;
-					}
-				}, backOffTime * 1000);
-				// Wait this period, someone is sending...
-				// Set your back-off time and can not transmit
-				
-				
-				System.out.println(getStationName()+"[BO "+backOffTime + "ms]");
-				
+			// Are you waiting for a while?
+			if (this.backOffTime >= this.maxContensionWindowSize ) {
+	
+				System.out.println(this.getStationName() + " aborting after " + this.getBackoffTime() + "." + "  "+ "\t t:= " + System.currentTimeMillis());
 			
-			this.isreadyForTransmission = true;
-		}
+					this.backOffTime = 0; 
+					this.isreadyForTransmission = true;
+			}
+			else {
+				
+					if(this.isACK_received == true) {
+						
+						// OK, you recived an ACK. Done. 
+						try {
+							this.interrupt();
+							
+						} catch (SecurityException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+						
+						this.notifyAll();
+						
+					}else {
+					
+						this.backOffTime+= new Random().nextInt(100);
+						System.out.println(getStationName()+"[ BO "+this.getBackoffTime() + "ms ]");
+						
+						Timer t = new Timer();
+						t.schedule(new TimerTask() {
+							
+							public void run() {
+								isreadyForTransmission = false;
+								isTransmitting = false;
+							}
+						}, this.backOffTime * 1000);
+						
+						t.cancel();
+						
+						// Try transmitting after back-off time is expired 
+						this.isreadyForTransmission = true;
+						this.isTransmitting = true;
+					
+					}
+			}
 	}
 
+	
+	@Override 
+	public int compareTo(Station s) {
+		
+		return this.getBackoffTime() - s.getBackoffTime();
+	}
+	
 	/**
 	 * @return the BO time for this Station
 	 */
 	public synchronized int getBackoffTime() {
-		return backOffTime;
+		return this.backOffTime;
 	}
 
 	/**
@@ -471,8 +536,7 @@ class Station extends Thread {
 	public void trasmitDataToDestination() {
 		synchronized (this) {
 			// Start transmitting...
-			System.out.println(this.getSourceStation().getStationName() + " ---[ FRAME ]---> " + " "
-					+ this.getDestinationStation().getStationName() + "  "+  "\t t=: " + System.currentTimeMillis());
+			System.out.println(this.getSourceStation().getStationName() + " ---[ FRAME ]--->" + getDestinationStation().getStationName() + " t=: " + System.currentTimeMillis());
 			// The source received the ACK
 			this.isACK_received = true;
 		}
@@ -532,7 +596,7 @@ class Station extends Thread {
 	 * 		the communication channel for this Station
 	 * 
 	 * */
-	public void setCommunicationChannel(Carrier.Channel carrierChannel) {
+	public synchronized void setCommunicationChannel(Carrier.Channel carrierChannel) {
 		this.mainChannel = carrierChannel;
 
 	}
@@ -540,7 +604,7 @@ class Station extends Thread {
 	/**
 	 * @return the iFS_TIME
 	 */
-	public int getIFS_TIME() {
+	public synchronized int getIFS_TIME() {
 		return IFS_TIME;
 	}
 
